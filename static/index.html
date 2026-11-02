@@ -1,0 +1,303 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>小管家 · LifeAgent</title>
+<meta name="description" content="本地优先的生活助理：记账、待办、今日概览，一句话搞定。数据只存在你自己的电脑里。">
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><rect width='32' height='32' rx='8' fill='%230b0f14'/><circle cx='16' cy='13' r='5' fill='none' stroke='%2334d399' stroke-width='2.2'/><path d='M7 27c1.6-4.6 5-7 9-7s7.4 2.4 9 7' fill='none' stroke='%2334d399' stroke-width='2.2' stroke-linecap='round'/></svg>">
+<style>
+:root{
+  --bg:#0b0f14; --panel:#111820; --panel2:#0e141b; --line:#1e2833; --line2:#2a3745;
+  --text:#e9eff5; --muted:#8b9aa8; --dim:#5f6d7a;
+  --green:#34d399; --green-d:#10b981; --amber:#fbbf24; --red:#f87171; --blue:#60a5fa;
+  --mono:"JetBrains Mono",ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+html,body{height:100%}
+body{
+  background:var(--bg); color:var(--text);
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Hiragino Sans GB","Microsoft YaHei",sans-serif;
+  -webkit-font-smoothing:antialiased; overflow:hidden;
+  background-image:radial-gradient(800px 400px at 90% -10%,rgba(52,211,153,.10),transparent 60%);
+  background-repeat:no-repeat;
+}
+button{font-family:inherit;cursor:pointer;border:0;background:none;color:inherit}
+
+/* ---------- 布局 ---------- */
+.app{display:flex;flex-direction:column;height:100dvh}
+.top{display:flex;align-items:center;gap:12px;padding:14px 22px;border-bottom:1px solid var(--line);background:rgba(11,15,20,.85);backdrop-filter:blur(10px)}
+.logo{width:30px;height:30px;border-radius:9px;background:linear-gradient(150deg,rgba(52,211,153,.22),rgba(52,211,153,.04));display:grid;place-items:center;border:1px solid rgba(52,211,153,.35)}
+.logo svg{width:18px;height:18px}
+.name{font-weight:800;letter-spacing:.02em;font-size:16px}
+.name small{font-weight:500;color:var(--dim);font-size:11px;margin-left:8px;font-family:var(--mono);letter-spacing:.08em}
+.badge{margin-left:auto;display:flex;align-items:center;gap:8px;font-size:12px;color:var(--muted);border:1px solid var(--line2);padding:5px 11px;border-radius:999px}
+.dot{width:6px;height:6px;border-radius:50%;background:var(--green);box-shadow:0 0 10px var(--green)}
+.dot.llm{background:var(--blue);box-shadow:0 0 10px var(--blue)}
+.ghost{display:flex;align-items:center;gap:6px;font-size:12.5px;color:var(--muted);border:1px solid var(--line2);padding:6px 12px;border-radius:9px;transition:.15s}
+.ghost:hover{color:var(--green);border-color:rgba(52,211,153,.5)}
+
+.main{display:grid;grid-template-columns:minmax(0,1fr) 372px;flex:1;min-height:0}
+@media (max-width:900px){
+  .main{grid-template-columns:1fr}
+  .side{display:none}
+  .app.mobile-side .side{display:flex;position:fixed;inset:57px 0 0 0;z-index:30;border-left:0}
+}
+
+/* ---------- 聊天 ---------- */
+.chat{display:flex;flex-direction:column;min-height:0;border-right:1px solid var(--line)}
+.msgs{flex:1;overflow-y:auto;padding:26px 26px 8px;display:flex;flex-direction:column;gap:14px;scroll-behavior:smooth}
+.msgs::-webkit-scrollbar{width:8px}
+.msgs::-webkit-scrollbar-thumb{background:#1d2732;border-radius:8px}
+.msg{max-width:min(680px,86%);padding:12px 15px;border-radius:14px;font-size:14.5px;line-height:1.65;white-space:pre-wrap;word-break:break-word;animation:in .18s ease}
+@keyframes in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:none}}
+.msg.bot{align-self:flex-start;background:var(--panel);border:1px solid var(--line);border-top-left-radius:5px}
+.msg.me{align-self:flex-end;background:linear-gradient(160deg,#12352a,#0f2a22);border:1px solid rgba(52,211,153,.28);border-top-right-radius:5px}
+.msg.me{color:#d8f5e9}
+.typing{align-self:flex-start;display:flex;gap:4px;padding:14px 16px;background:var(--panel);border:1px solid var(--line);border-radius:14px;border-top-left-radius:5px}
+.typing i{width:6px;height:6px;border-radius:50%;background:var(--dim);animation:bounce 1.1s infinite}
+.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}
+@keyframes bounce{0%,60%,100%{transform:none;opacity:.5}30%{transform:translateY(-4px);opacity:1}}
+
+.quick{display:flex;gap:8px;padding:6px 26px 0;flex-wrap:wrap}
+.quick button{font-size:12.5px;color:var(--muted);border:1px dashed var(--line2);padding:6px 12px;border-radius:999px;transition:.15s}
+.quick button:hover{color:var(--green);border-color:rgba(52,211,153,.55);border-style:solid}
+
+.composer{display:flex;gap:10px;padding:14px 26px 20px;align-items:flex-end}
+.inputwrap{flex:1;display:flex;align-items:center;background:var(--panel);border:1px solid var(--line2);border-radius:13px;padding:4px 6px 4px 16px;transition:.15s}
+.inputwrap:focus-within{border-color:rgba(52,211,153,.55);box-shadow:0 0 0 3px rgba(52,211,153,.08)}
+#input{flex:1;background:none;border:0;outline:0;color:var(--text);font-size:15px;padding:12px 0}
+#input::placeholder{color:var(--dim)}
+.send{width:40px;height:40px;border-radius:10px;background:linear-gradient(150deg,var(--green),var(--green-d));display:grid;place-items:center;transition:.15s}
+.send:hover{filter:brightness(1.08)}
+.send:disabled{opacity:.35;cursor:default}
+.send svg{width:18px;height:18px;stroke:#04140e}
+
+/* ---------- 侧栏 ---------- */
+.side{display:flex;flex-direction:column;gap:14px;padding:18px;overflow-y:auto;background:var(--panel2)}
+.side::-webkit-scrollbar{width:8px}
+.side::-webkit-scrollbar-thumb{background:#1a232d;border-radius:8px}
+.card{border:1px solid var(--line);border-radius:14px;background:var(--panel);padding:16px}
+.card h3{font-size:12px;font-family:var(--mono);letter-spacing:.14em;color:var(--dim);text-transform:uppercase;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center}
+.card h3 span{font-family:inherit;letter-spacing:0;color:var(--muted);font-size:11.5px}
+.big{font-size:30px;font-weight:800;letter-spacing:-.02em}
+.big small{font-size:13px;font-weight:500;color:var(--dim);margin-left:6px}
+.sub{font-size:12.5px;color:var(--muted);margin-top:6px}
+.bars{display:flex;flex-direction:column;gap:9px;margin-top:16px}
+.bar{display:grid;grid-template-columns:52px 1fr 64px;gap:9px;align-items:center;font-size:12.5px}
+.bar .n{color:var(--muted)}
+.bar .t{height:6px;border-radius:4px;background:#1a232d;overflow:hidden}
+.bar .t i{display:block;height:100%;border-radius:4px;background:linear-gradient(90deg,var(--green-d),var(--green))}
+.bar .v{text-align:right;font-family:var(--mono);color:#cfdae3;font-size:12px}
+ul.todos{list-style:none;display:flex;flex-direction:column;gap:2px}
+ul.todos li{display:flex;align-items:flex-start;gap:10px;padding:9px 4px;border-bottom:1px dashed rgba(42,55,69,.7);font-size:13.5px}
+ul.todos li:last-child{border-bottom:0}
+ul.todos input{appearance:none;width:16px;height:16px;border-radius:5px;border:1.5px solid var(--line2);margin-top:2px;flex:none;transition:.15s;position:relative;cursor:pointer}
+ul.todos input:checked{background:var(--green);border-color:var(--green)}
+ul.todos input:checked::after{content:"";position:absolute;left:4.5px;top:1px;width:4px;height:8px;border:2px solid #04140e;border-top:0;border-left:0;transform:rotate(42deg)}
+ul.todos li.done span{text-decoration:line-through;color:var(--dim)}
+ul.todos span{flex:1;color:#d3dee7}
+ul.todos em{font-style:normal;font-size:11.5px;color:var(--dim);font-family:var(--mono);white-space:nowrap}
+ul.todos em.over{color:var(--red)}
+.recent{list-style:none;display:flex;flex-direction:column;gap:0;font-size:13px}
+.recent li{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px dashed rgba(42,55,69,.6)}
+.recent li:last-child{border:0}
+.recent .cat{font-size:11px;color:var(--dim);border:1px solid var(--line2);padding:2px 7px;border-radius:6px;flex:none}
+.recent .note{flex:1;color:#c9d5df;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.recent .amt{font-family:var(--mono);color:var(--amber);font-size:12.5px}
+.recent .del{color:var(--dim);font-size:15px;line-height:1;padding:0 2px}
+.recent .del:hover{color:var(--red)}
+.empty{color:var(--dim);font-size:13px;padding:6px 0}
+.foot{color:var(--dim);font-size:11.5px;text-align:center;line-height:1.7}
+.mobbtn{display:none}
+@media (max-width:900px){.mobbtn{display:flex}}
+</style>
+</head>
+<body>
+<div class="app" id="app">
+  <div class="top">
+    <div class="logo"><svg viewBox="0 0 24 24" fill="none"><circle cx="12" cy="9" r="4" stroke="#34d399" stroke-width="1.8"/><path d="M4 21c1.4-4 4.4-6 8-6s6.6 2 8 6" stroke="#34d399" stroke-width="1.8" stroke-linecap="round"/></svg></div>
+    <div class="name">小管家<small>LIFEAGENT</small></div>
+    <div class="badge" id="modeBadge"><span class="dot" id="modeDot"></span><span id="modeText">离线规则</span></div>
+    <a class="ghost" href="/api/export.csv" title="导出全部记账为 CSV">导出 CSV</a>
+    <button class="ghost mobbtn" id="mobbtn">概览</button>
+  </div>
+
+  <div class="main">
+    <div class="chat">
+      <div class="msgs" id="msgs">
+        <div class="msg bot" id="hello"></div>
+      </div>
+      <div class="quick">
+        <button data-t="午饭 28">午饭 28</button>
+        <button data-t="提醒我明天 9 点交材料">提醒我明天 9 点交材料</button>
+        <button data-t="这个月花了多少">这个月花了多少</button>
+        <button data-t="今天待办">今天待办</button>
+        <button data-t="今天怎么样">今天怎么样</button>
+      </div>
+      <div class="composer">
+        <div class="inputwrap">
+          <input id="input" placeholder="说句话，比如「打车 35 元」「周五下午 3 点开会」" autocomplete="off" autofocus>
+        </div>
+        <button class="send" id="send" aria-label="发送">
+          <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 12l16-8-6 8 6 8-16-8z"/></svg>
+        </button>
+      </div>
+    </div>
+
+    <aside class="side" id="side">
+      <div class="card">
+        <h3>本月支出 <span id="monthLabel"></span></h3>
+        <div class="big" id="monthTotal">0.00<small>元</small></div>
+        <div class="sub" id="monthSub">还没记账</div>
+        <div class="bars" id="bars"></div>
+      </div>
+      <div class="card">
+        <h3>今日待办 <span id="todoCount"></span></h3>
+        <ul class="todos" id="todos"></ul>
+      </div>
+      <div class="card">
+        <h3>最近记录</h3>
+        <ul class="recent" id="recent"></ul>
+      </div>
+      <div class="foot">数据只存在本机 <code>data/life.db</code><br>不联网、不上传、不需要注册</div>
+    </aside>
+  </div>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const msgs = $("msgs"), input = $("input"), sendBtn = $("send");
+let busy = false;
+
+const HELLO = "你好，我是小管家。\n直接把生活里的事说给我就行：记一笔账、加个提醒、问问这个月花了多少。\n试试下面的快捷按钮，或者输入「帮助」。";
+
+function el(tag, cls, text){ const e = document.createElement(tag); if(cls) e.className = cls; if(text!=null) e.textContent = text; return e; }
+function push(role, text){ const d = el("div", "msg " + role, text); msgs.appendChild(d); scroll(); return d; }
+function scroll(){ requestAnimationFrame(()=>{ msgs.scrollTop = msgs.scrollHeight; }); }
+function typing(on){
+  let t = document.getElementById("typing");
+  if(on && !t){ t = el("div","typing"); t.id="typing"; t.innerHTML="<i></i><i></i><i></i>"; msgs.appendChild(t); scroll(); }
+  if(!on && t) t.remove();
+}
+
+async function api(path, body){
+  const opt = body ? {method:"POST", headers:{"Content-Type":"application/json"}, body: JSON.stringify(body)} : {};
+  const r = await fetch(path, opt);
+  if(!r.ok) throw new Error("HTTP " + r.status);
+  return r.json();
+}
+
+function render(state){
+  if(!state) return;
+  const b = state.briefing || state;
+  const total = b.month_total || 0;
+  $("monthTotal").innerHTML = total.toFixed(2) + "<small>元</small>";
+  $("monthLabel").textContent = b.date ? b.date.slice(0,7) : "";
+  const prev = b.prev_month_total || 0;
+  let sub = "共 " + (b.week_count||0) + " 笔本周记录";
+  if(prev > 0){
+    const d = total - prev, pct = Math.round(Math.abs(d)/prev*100);
+    sub = "较上月" + (d>=0 ? "多 " : "少 ") + pct + "% · 本周 " + (b.week_total||0).toFixed(0) + " 元";
+  }
+  $("monthSub").textContent = sub;
+
+  // 分类条
+  const bars = $("bars"); bars.innerHTML = "";
+  const cats = (b.by_category && b.by_category.length) ? b.by_category : [];
+  if(!cats.length){ bars.appendChild(el("div","empty","这个月还没有支出记录")); }
+  else {
+    const max = Math.max(...cats.map(c=>c.total));
+    cats.slice(0,5).forEach(c=>{
+      const row = el("div","bar");
+      row.appendChild(el("div","n",c.category));
+      const t = el("div","t"); const i = el("i"); i.style.width = Math.max(4, c.total/max*100) + "%"; t.appendChild(i);
+      row.appendChild(t);
+      row.appendChild(el("div","v", c.total.toFixed(0) + " 元"));
+      bars.appendChild(row);
+    });
+  }
+
+  // 待办：今日 + 逾期置顶，其余按时间
+  const todos = $("todos"); todos.innerHTML = "";
+  const todayStr = b.date || new Date().toISOString().slice(0,10);
+  const openList = (b.open_tasks || []).slice().sort((x,y)=>{
+    const sx = (x.overdue?0:(x.due_at && x.due_at.slice(0,10)===todayStr ? 1 : 2));
+    const sy = (y.overdue?0:(y.due_at && y.due_at.slice(0,10)===todayStr ? 1 : 2));
+    if(sx !== sy) return sx - sy;
+    return String(x.due_at||"9999").localeCompare(String(y.due_at||"9999"));
+  });
+  $("todoCount").textContent = (b.open_count||0) + " 条未完成";
+  if(!openList.length){ todos.appendChild(el("li","empty","没有待办，舒服。")); }
+  openList.slice(0,8).forEach(t=>{
+    const li = el("li");
+    const cb = el("input"); cb.type = "checkbox";
+    cb.onchange = async ()=>{ await api("/api/task/toggle", {id:t.id}); refresh(); };
+    li.appendChild(cb);
+    li.appendChild(el("span", null, (t.overdue ? "⚠️ " : "") + t.title));
+    let label = "";
+    if(t.due_at){
+      const d = t.due_at.slice(0,10);
+      label = d === todayStr ? "今天 " + t.due_at.slice(11,16)
+            : (t.overdue ? "已逾期" : t.due_at.slice(5,16));
+    }
+    li.appendChild(el("em", t.overdue ? "over" : "", label));
+    todos.appendChild(li);
+  });
+
+  // 最近
+  const rec = $("recent"); rec.innerHTML = "";
+  const recent = b.recent || [];
+  if(!recent.length){ rec.appendChild(el("li","empty","还没有记账")); }
+  recent.slice(0,6).forEach(r=>{
+    const li = el("li");
+    li.appendChild(el("span","cat",r.category));
+    li.appendChild(el("span","note",r.note || "—"));
+    li.appendChild(el("span","amt","¥" + Number(r.amount).toFixed(2)));
+    const del = el("button","del","×"); del.title = "删除这条";
+    del.onclick = async ()=>{ await api("/api/expense/delete",{id:r.id}); refresh(); };
+    li.appendChild(del);
+    rec.appendChild(li);
+  });
+
+  const modeBadge = $("modeDot").classList;
+  if(state.mode === "llm"){ modeBadge.add("llm"); $("modeText").textContent = "大模型"; }
+  else { modeBadge.remove("llm"); $("modeText").textContent = "离线规则"; }
+}
+
+async function refresh(){
+  try { const s = await api("/api/state"); render(s); } catch(e){ console.warn(e); }
+}
+
+async function say(text){
+  if(busy) return;
+  const t = (text !== undefined ? text : input.value).trim();
+  if(!t) return;
+  input.value = "";
+  push("me", t);
+  busy = true; sendBtn.disabled = true; typing(true);
+  try {
+    const r = await api("/api/chat", {text: t});
+    typing(false);
+    push("bot", r.reply);
+    if(r.state) render({briefing: r.state, mode: r.mode});
+  } catch(e){
+    typing(false);
+    push("bot", "出错了：" + e.message + "\n（服务还在跑吗？看看终端窗口）");
+  } finally {
+    busy = false; sendBtn.disabled = false; input.focus();
+  }
+}
+
+sendBtn.onclick = ()=>say();
+input.addEventListener("keydown", e=>{ if(e.key === "Enter" && !e.shiftKey){ e.preventDefault(); say(); } });
+document.querySelectorAll(".quick button").forEach(b=> b.onclick = ()=> say(b.dataset.t));
+$("mobbtn").onclick = ()=> $("app").classList.toggle("mobile-side");
+
+(async function boot(){
+  $("hello").textContent = HELLO;
+  await refresh();
+})();
+</script>
+</body>
+</html>
