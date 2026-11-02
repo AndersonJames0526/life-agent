@@ -38,6 +38,9 @@ button{cursor:pointer;border:0;background:none;color:inherit}
 .ghost:hover{color:var(--green);border-color:rgba(52,211,153,.5)}
 .ghost.primary{color:var(--green);border-color:rgba(52,211,153,.45)}
 .ghost.on{color:#04140e;background:var(--green);border-color:var(--green);font-weight:700}
+.install{display:none;color:var(--green);border-color:rgba(52,211,153,.45)}
+.install.show{display:flex}
+@media(max-width:980px){.install{display:flex}}
 /* layout */
 .main{display:grid;grid-template-columns:minmax(0,1fr) 400px;flex:1;min-height:0}
 @media(max-width:980px){.main{grid-template-columns:1fr}.side{display:none}.app.mobile-side .side{display:flex;position:fixed;inset:55px 0 0 0;z-index:40;border-left:0}.mobbtn{display:flex!important}}
@@ -765,13 +768,31 @@ let deferredPrompt = null;
 const btnInstall = $("btnInstall");
 window.addEventListener("beforeinstallprompt", (e) => { e.preventDefault(); deferredPrompt = e; btnInstall.classList.add("show"); });
 window.addEventListener("appinstalled", () => { btnInstall.classList.remove("show"); deferredPrompt = null; });
+const ua = navigator.userAgent;
+const isStandalone = (window.matchMedia && window.matchMedia("(display-mode: standalone)").matches) || window.navigator.standalone === true;
+if (isStandalone) btnInstall.style.display = "none";
+
 btnInstall.onclick = async () => {
-  if (deferredPrompt) { deferredPrompt.prompt(); const r = await deferredPrompt.userChoice; deferredPrompt = null; if (r && r.outcome === "accepted") btnInstall.classList.remove("show"); return; }
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  alert(ios
-    ? "iPhone / iPad：\n1) 用 Safari 打开本页\n2) 点底部「分享」\n3) 选「添加到主屏幕」"
-    : "安卓：\n1) 点浏览器右上角 ⋮\n2) 选「安装应用」或「添加到主屏幕」");
+  if (deferredPrompt) {
+    deferredPrompt.prompt();
+    const r = await deferredPrompt.userChoice;
+    deferredPrompt = null;
+    if (r && r.outcome === "accepted") btnInstall.style.display = "none";
+    return;
+  }
+  const inWX = /MicroMessenger|QQ\/|Weibo/i.test(ua);
+  const ios = /iphone|ipad|ipod/i.test(ua);
+  if (inWX) {
+    alert("你现在在微信/QQ 内置浏览器里，它不支持「安装到桌面」。\n\n① 点右上角「···」\n② 选「在浏览器打开」\n③ 用 Safari（iPhone）或 Chrome（安卓）打开后，再按提示安装");
+    return;
+  }
+  if (ios) {
+    alert("iPhone / iPad 安装步骤：\n\n① 必须是用 Safari 打开的（微信、Chrome 里没有这个功能）\n② 点底部「分享」按钮（方框 + 向上箭头）\n③ 菜单往下滑，找到「添加到主屏幕」\n④ 点「添加」\n\n分享菜单里没有这一项 = 当前不是 Safari");
+    return;
+  }
+  alert("安卓安装步骤：\n\n① 点浏览器右上角「⋮」\n② 选「安装应用」或「添加到主屏幕」\n③ 确认\n\n没有这两项 = 浏览器不支持，换 Chrome 或 Edge 打开本页");
 };
+
 if ("serviceWorker" in navigator && location.protocol.startsWith("http")) navigator.serviceWorker.register("sw.js").catch(() => {});
 
 /* ======================= 启动 ======================= */

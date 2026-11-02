@@ -1,5 +1,5 @@
-/* 小管家 PWA Service Worker —— 缓存 App 外壳，断网也能用 */
-const CACHE = "lifeagent-v4";
+﻿/* 小管家 PWA Service Worker —— 缓存 App 外壳，断网也能用 */
+const CACHE = "lifeagent-v5";
 const ASSETS = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./apple-touch-icon.png"];
 
 self.addEventListener("install", (e) => {
