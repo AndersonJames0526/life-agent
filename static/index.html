@@ -147,9 +147,19 @@ ul.todos em.over{color:var(--red)}
 
     <aside class="side" id="side">
       <div class="card">
-        <h3>本月支出 <span id="monthLabel"></span></h3>
+        <h3>本月结余 <span id="monthLabel"></span></h3>
         <div class="big" id="monthTotal">0.00<small>元</small></div>
         <div class="sub" id="monthSub">还没记账</div>
+        <div class="trio" id="trio" style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin:10px 0 4px">
+          <div style="background:#0a0f14;border:1px solid var(--line);border-radius:9px;padding:7px 9px">
+            <div style="font-size:10.5px;color:var(--dim)">收入</div>
+            <div id="vIn" style="font-size:15px;font-weight:700;color:var(--green)">0</div>
+          </div>
+          <div style="background:#0a0f14;border:1px solid var(--line);border-radius:9px;padding:7px 9px">
+            <div style="font-size:10.5px;color:var(--dim)">支出</div>
+            <div id="vOut" style="font-size:15px;font-weight:700;color:var(--amber)">0</div>
+          </div>
+        </div>
         <div class="bars" id="bars"></div>
       </div>
       <div class="card">
@@ -192,13 +202,18 @@ function render(state){
   if(!state) return;
   const b = state.briefing || state;
   const total = b.month_total || 0;
-  $("monthTotal").innerHTML = total.toFixed(2) + "<small>元</small>";
+  const inc = b.month_income || 0;
+  const bal = (b.month_balance !== undefined) ? b.month_balance : total;
+  $("monthTotal").innerHTML = bal.toFixed(2) + "<small>元</small>";
+  $("monthTotal").style.color = bal < 0 ? "var(--red)" : "var(--text)";
+  $("vIn").textContent = inc.toFixed(2);
+  $("vOut").textContent = total.toFixed(2);
   $("monthLabel").textContent = b.date ? b.date.slice(0,7) : "";
   const prev = b.prev_month_total || 0;
   let sub = "共 " + (b.week_count||0) + " 笔本周记录";
   if(prev > 0){
     const d = total - prev, pct = Math.round(Math.abs(d)/prev*100);
-    sub = "较上月" + (d>=0 ? "多 " : "少 ") + pct + "% · 本周 " + (b.week_total||0).toFixed(0) + " 元";
+    sub = "支出较上月" + (d>=0 ? "多 " : "少 ") + pct + "% · 本周 " + (b.week_total||0).toFixed(0) + " 元";
   }
   $("monthSub").textContent = sub;
 
@@ -251,9 +266,12 @@ function render(state){
   if(!recent.length){ rec.appendChild(el("li","empty","还没有记账")); }
   recent.slice(0,6).forEach(r=>{
     const li = el("li");
-    li.appendChild(el("span","cat",r.category));
+    const isIn = r.kind === "income";
+    li.appendChild(el("span","cat", (isIn ? "＋ " : "－ ") + r.category));
     li.appendChild(el("span","note",r.note || "—"));
-    li.appendChild(el("span","amt","¥" + Number(r.amount).toFixed(2)));
+    const amt = el("span","amt", (isIn ? "+" : "-") + Number(r.amount).toFixed(2));
+    amt.style.color = isIn ? "var(--green)" : "var(--amber)";
+    li.appendChild(amt);
     const del = el("button","del","×"); del.title = "删除这条";
     del.onclick = async ()=>{ await api("/api/expense/delete",{id:r.id}); refresh(); };
     li.appendChild(del);

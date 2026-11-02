@@ -52,6 +52,18 @@ CATEGORIES = {
     "人情": ["红包", "礼物", "份子", "请客", "随礼"],
 }
 
+INCOME_CATEGORIES = {
+    "工资": ["工资", "薪水", "月薪", "发薪", "薪资"],
+    "兼职": ["兼职", "外快", "私活", "接单", "稿费", "劳务"],
+    "投资": ["理财", "基金", "股票", "利息", "分红", "收益"],
+    "红包": ["收红包", "收到红包", "压岁钱"],
+    "报销": ["报销", "退款", "返现", "返利"],
+    "其他": ["奖金", "补贴", "中奖", "卖了", "二手"],
+}
+INCOME_HINT = re.compile(
+    r"工资|薪水|月薪|发薪|收入|进账|到账|收到|收红包|报销|退款|返现|返利|兼职|外快|私活|稿费|劳务|理财|基金|股票|利息|分红|收益|奖金|补贴|中奖|卖了|二手"
+)
+
 # --------------------------------------------------------------------------
 # 数据库
 # --------------------------------------------------------------------------
@@ -59,6 +71,7 @@ CATEGORIES = {
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS expenses (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind       TEXT NOT NULL DEFAULT 'expense',
     day        TEXT NOT NULL,
     amount     REAL NOT NULL,
     category   TEXT NOT NULL,
@@ -89,6 +102,10 @@ def db() -> sqlite3.Connection:
 def init_db() -> None:
     with db() as conn:
         conn.executescript(_SCHEMA)
+        # 兼容 v1 的老库：补 kind 列
+        cols = [r[1] for r in conn.execute("PRAGMA table_info(expenses)")]
+        if "kind" not in cols:
+            conn.execute("ALTER TABLE expenses ADD COLUMN kind TEXT NOT NULL DEFAULT 'expense'")
 
 
 def _now() -> str:
@@ -99,19 +116,29 @@ def _now() -> str:
 # 工具层（Agent 可调用的能力）
 # --------------------------------------------------------------------------
 
-def tool_record_expense(amount: float, category: str = "", note: str = "", day: str = "") -> dict:
+def tool_record_expense(amount: float, category: str = "", note: str = "", day: str = "",
+                         kind: str = "expense") -> dict:
     if amount <= 0:
         return {"ok": False, "error": "金额必须大于 0"}
+    kind = "income" if str(kind).lower().startswith("in") else "expense"
     day = day or date.today().isoformat()
-    category = category or guess_category(note) or "其他"
+    category = category or (guess_income(note) if kind == "income" else guess_category(note)) or "其他"
     with db() as conn:
         cur = conn.execute(
-            "INSERT INTO expenses(day, amount, category, note, created_at) VALUES (?,?,?,?,?)",
-            (day, round(float(amount), 2), category, note.strip(), _now()),
+            "INSERT INTO expenses(kind, day, amount, category, note, created_at) VALUES (?,?,?,?,?,?)",
+            (kind, day, round(float(amount), 2), category, note.strip(), _now()),
         )
         eid = cur.lastrowid
-    return {"ok": True, "id": eid, "day": day, "amount": round(float(amount), 2),
+    return {"ok": True, "id": eid, "kind": kind, "day": day, "amount": round(float(amount), 2),
             "category": category, "note": note.strip()}
+
+
+def guess_income(text: str) -> str:
+    for cat, words in INCOME_CATEGORIES.items():
+        for w in words:
+            if w in text:
+                return cat
+    return ""
 
 
 def tool_list_expenses(month: str = "", limit: int = 10) -> dict:
@@ -135,23 +162,35 @@ def tool_stats(month: str = "", category: str = "") -> dict:
         if category:
             rows = conn.execute(
                 "SELECT category, SUM(amount) total, COUNT(*) n FROM expenses "
-                "WHERE day LIKE ? AND category=? GROUP BY category",
+                "WHERE day LIKE ? AND kind='expense' AND category=? GROUP BY category",
                 (month + "%", category),
             ).fetchall()
         else:
             rows = conn.execute(
                 "SELECT category, SUM(amount) total, COUNT(*) n FROM expenses "
-                "WHERE day LIKE ? GROUP BY category ORDER BY total DESC",
+                "WHERE day LIKE ? AND kind='expense' GROUP BY category ORDER BY total DESC",
                 (month + "%",),
             ).fetchall()
+        inc_rows = conn.execute(
+            "SELECT category, SUM(amount) total, COUNT(*) n FROM expenses "
+            "WHERE day LIKE ? AND kind='income' GROUP BY category ORDER BY total DESC",
+            (month + "%",),
+        ).fetchall()
         total_row = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM expenses WHERE day LIKE ?",
+            "SELECT COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0) inc,"
+            " COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0) exp,"
+            " COUNT(*) c FROM expenses WHERE day LIKE ?",
             (month + "%",),
         ).fetchone()
     return {
         "ok": True, "month": month,
-        "total": round(total_row["s"], 2), "count": total_row["c"],
+        "total": round(total_row["exp"], 2),
+        "expense": round(total_row["exp"], 2),
+        "income": round(total_row["inc"], 2),
+        "balance": round(total_row["inc"] - total_row["exp"], 2),
+        "count": total_row["c"],
         "by_category": [{"category": r["category"], "total": round(r["total"], 2), "count": r["n"]} for r in rows],
+        "income_by_category": [{"category": r["category"], "total": round(r["total"], 2), "count": r["n"]} for r in inc_rows],
     }
 
 
@@ -225,15 +264,17 @@ def tool_undo_last(kind: str = "expense") -> dict:
 def tool_briefing() -> dict:
     today = date.today()
     week_start = (today - timedelta(days=today.weekday())).isoformat()
+    SUM_INC = "COALESCE(SUM(CASE WHEN kind='income' THEN amount ELSE 0 END),0)"
+    SUM_EXP = "COALESCE(SUM(CASE WHEN kind='expense' THEN amount ELSE 0 END),0)"
     with db() as conn:
         week = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) s, COUNT(*) c FROM expenses WHERE day >= ?", (week_start,)
+            "SELECT " + SUM_EXP + " s, " + SUM_INC + " inc, COUNT(*) c FROM expenses WHERE day >= ?", (week_start,)
         ).fetchone()
         month = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE day LIKE ?", (today.strftime("%Y-%m") + "%",)
+            "SELECT " + SUM_EXP + " s, " + SUM_INC + " inc FROM expenses WHERE day LIKE ?", (today.strftime("%Y-%m") + "%",)
         ).fetchone()
         prev_month = conn.execute(
-            "SELECT COALESCE(SUM(amount),0) s FROM expenses WHERE day LIKE ?", (
+            "SELECT " + SUM_EXP + " s FROM expenses WHERE day LIKE ?", (
                 (today.replace(day=1) - timedelta(days=1)).strftime("%Y-%m") + "%",)
         ).fetchone()
         tasks = conn.execute(
@@ -241,7 +282,11 @@ def tool_briefing() -> dict:
         ).fetchall()
         recent = conn.execute("SELECT * FROM expenses ORDER BY id DESC LIMIT 6").fetchall()
         cats = conn.execute(
-            "SELECT category, SUM(amount) t, COUNT(*) n FROM expenses WHERE day LIKE ? "
+            "SELECT category, SUM(amount) t, COUNT(*) n FROM expenses WHERE day LIKE ? AND kind='expense' "
+            "GROUP BY category ORDER BY t DESC", (today.strftime("%Y-%m") + "%",),
+        ).fetchall()
+        inc_cats = conn.execute(
+            "SELECT category, SUM(amount) t FROM expenses WHERE day LIKE ? AND kind='income' "
             "GROUP BY category ORDER BY t DESC", (today.strftime("%Y-%m") + "%",),
         ).fetchall()
     todo_today, overdue = [], []
@@ -256,6 +301,10 @@ def tool_briefing() -> dict:
         "date": today.isoformat(),
         "week_total": round(week["s"], 2), "week_count": week["c"],
         "month_total": round(month["s"], 2),
+        "month_income": round(month["inc"], 2),
+        "month_balance": round(month["inc"] - month["s"], 2),
+        "week_income": round(week["inc"], 2),
+        "income_by_category": [{"category": c["category"], "total": round(c["t"], 2)} for c in inc_cats],
         "prev_month_total": round(prev_month["s"], 2),
         "todo_today": todo_today, "overdue": overdue, "open_count": len(tasks),
         "open_tasks": [dict(t) for t in tasks],
@@ -359,7 +408,7 @@ def parse_due(text: str):
 
 
 TASK_HINT = re.compile(r"提醒|记得|别忘|要交|需交|开会|预约|截止|ddl|DDL|加个待办|添加待办|记个待办|加个任务|添加任务")
-STATS_HINT = re.compile(r"花了多少|花多少|支出|消费|统计|账单|开销|花了多少钱|月花|这个月|上周花|本月")
+STATS_HINT = re.compile(r"花了多少|花多少|支出|消费|统计|账单|开销|花了多少钱|月花|这个月|上周花|本月|结余|余额|收入多少|赚了多少|收支")
 LIST_HINT = re.compile(r"待办|任务|要做什么|有什么要|还有什么没|清单|todo|Todo")
 COMPLETE_HINT = re.compile(r"(完成|做完|搞定|勾掉|打勾|done)")
 UNDO_HINT = re.compile(r"撤销|删掉上一|删掉最后|撤销上一|删最后|记录错了|记错了")
@@ -419,7 +468,22 @@ def handle(text: str) -> dict:
             c = s["by_category"][0]
             return {"reply": "%s 在「%s」上花了 %.2f 元，共 %d 笔。" % (month, cat, c["total"], c["count"]),
                     "actions": ["stats"], "data": s}
-        lines = ["%s 共支出 %.2f 元（%d 笔）：" % (month, s["total"], s["count"])]
+        if re.search(r"结余|余额|收支", t):
+            lines = ["%s 收支：" % month,
+                     "· 收入 %.2f 元" % s["income"],
+                     "· 支出 %.2f 元" % s["expense"],
+                     "· 结余 %.2f 元" % s["balance"]]
+            return {"reply": "\n".join(lines), "actions": ["stats"], "data": s}
+        if re.search(r"收入|赚", t):
+            if not s["income_by_category"]:
+                return {"reply": "%s 还没有收入记录。" % month, "actions": ["stats"]}
+            lines = ["%s 收入 %.2f 元：" % (month, s["income"])]
+            for c in s["income_by_category"][:5]:
+                lines.append("· %s %.2f" % (c["category"], c["total"]))
+            return {"reply": "\n".join(lines), "actions": ["stats"], "data": s}
+        lines = ["%s 共支出 %.2f 元（%d 笔）：" % (month, s["expense"], s["count"])]
+        if s["income"] > 0:
+            lines.append("（同期收入 %.2f 元，结余 %.2f 元）" % (s["income"], s["balance"]))
         for c in s["by_category"][:5]:
             lines.append("· %s %.2f（%d 笔）" % (c["category"], c["total"], c["count"]))
         return {"reply": "\n".join(lines), "actions": ["stats"], "data": s}
@@ -452,22 +516,31 @@ def handle(text: str) -> dict:
         lines = ["%s 的小结：" % b["date"],
                  "· 今天待办 %d 条，逾期 %d 条" % (len(b["todo_today"]), len(b["overdue"])),
                  "· 本周花了 %.2f 元（%d 笔）" % (b["week_total"], b["week_count"]),
-                 "· 本月累计 %.2f 元" % b["month_total"]]
+                 "· 本月收入 %.2f / 支出 %.2f / 结余 %.2f" % (b["month_income"], b["month_total"], b["month_balance"])]
         if b["todo_today"]:
             lines.append("今天的：" + "；".join(x["title"] for x in b["todo_today"][:5]))
         return {"reply": "\n".join(lines), "actions": ["briefing"], "data": b}
 
     amount, _ = parse_amount(t)
     if amount is not None:
-        cat = guess_category(t) or "其他"
+        is_income = bool(INCOME_HINT.search(t)) and not re.search(r"给|送礼|发红包给", t)
+        day = parse_day(t)
         note = re.sub(r"(\d{1,7}(?:\.\d{1,2})?)\s*(?:元|块钱|块|rmb|RMB)?", "", t)
         note = re.sub(r"^(记一笔|记账|花了|我花了|今天|昨天|前天)", "", note.strip()).strip(" ，,。")
+        if is_income:
+            cat = guess_income(t) or "其他"
+            note = note or cat
+            r = tool_record_expense(amount, cat, note, day, kind="income")
+            if not r["ok"]:
+                return {"reply": r["error"], "actions": []}
+            return {"reply": "💰 收入记好了：%s +%.2f 元 → %s（%s）" % (day, amount, cat, note),
+                    "actions": ["add_income"], "data": r}
+        cat = guess_category(t) or "其他"
         note = note or cat
-        day = parse_day(t)
         r = tool_record_expense(amount, cat, note, day)
         if not r["ok"]:
             return {"reply": r["error"], "actions": []}
-        return {"reply": "记好了：%s %.2f 元 → %s（%s）" % (day, amount, cat, note),
+        return {"reply": "💸 支出记好了：%s -%.2f 元 → %s（%s）" % (day, amount, cat, note),
                 "actions": ["add_expense"], "data": r}
 
     return {"reply": "我没太听懂。可以试试：\n· 午饭 28\n· 提醒我明天 9 点交材料\n· 这个月花了多少\n· 今天待办\n输入「帮助」看全部用法。",
@@ -490,7 +563,9 @@ HELP_TEXT = """我可以帮你做这些（离线也能用）：
 LLM_TOOLS = [
     {"type": "function", "function": {"name": "record_expense", "description": "记一笔支出",
      "parameters": {"type": "object", "properties": {
-         "amount": {"type": "number"}, "category": {"type": "string", "enum": list(CATEGORIES) + ["其他"]},
+         "amount": {"type": "number"},
+         "kind": {"type": "string", "enum": ["expense", "income"], "description": "支出还是收入"},
+         "category": {"type": "string", "enum": list(CATEGORIES) + list(INCOME_CATEGORIES)},
          "note": {"type": "string"}, "day": {"type": "string", "description": "YYYY-MM-DD，默认今天"}},
          "required": ["amount"]}}},
     {"type": "function", "function": {"name": "stats", "description": "统计某月支出，可按分类过滤",
@@ -525,7 +600,8 @@ def _llm_call(messages):
 def _exec_tool(name: str, args: dict) -> dict:
     try:
         if name == "record_expense":
-            return tool_record_expense(args.get("amount", 0), args.get("category", ""), args.get("note", ""), args.get("day", ""))
+            return tool_record_expense(args.get("amount", 0), args.get("category", ""), args.get("note", ""),
+                                       args.get("day", ""), kind=args.get("kind", "expense"))
         if name == "stats":
             return tool_stats(args.get("month", ""), args.get("category", ""))
         if name == "add_task":
@@ -548,7 +624,7 @@ def handle_with_llm(text: str) -> dict:
     if not LLM_KEY:
         return handle(text)
     sys_prompt = (
-        "你是「小管家」，一个本地生活助理。用户说中文。"
+        "你是「小管家」，一个本地生活助理。用户说中文。注意区分收入(kind=income，如工资、兼职、报销)和支出(kind=expense)。"
         "先判断意图：记账、查账、加待办、查待办、完成待办、要概览。"
         "能用工具就不要只聊天。金额只取用户明确说的数字。"
         "如果用户只是闲聊，用一句简短中文回复，不要调用工具。"
@@ -710,6 +786,9 @@ def self_test() -> int:
         ("这个月花了多少", "stats"),
         ("完成 交材料", "complete_task"),
         ("撤销上一笔", "undo_expense"),
+        ("发工资 18000", "add_income"),
+        ("兼职 1200", "add_income"),
+        ("这个月结余", "stats"),
     ]
     failed = 0
     for text, expect in cases:
