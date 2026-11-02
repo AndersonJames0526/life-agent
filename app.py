@@ -368,7 +368,7 @@ BRIEF_HINT = re.compile(r"今天|今日|概览|简报|汇总|情况|怎么样")
 
 def clean_title(text: str) -> str:
     t = TASK_HINT.sub("", text)
-    t = re.sub(r"^(我|你)?(要|得|需要)?", "", t.strip())
+    t = re.sub(r"^(我|你)(要|得|需要|想)?\s*", "", t.strip())
     t = re.sub(r"(提醒我|记得|别忘(了)?|帮我|一下|，|,)", "", t)
     for w in list(DATE_WORDS) + ["上午", "下午", "晚上", "中午", "凌晨"]:
         t = t.replace(w, "")

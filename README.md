@@ -5,6 +5,19 @@
 
 ![界面截图](docs/screenshot.png)
 
+## 三种用法，挑一个
+
+| 方式 | 适合谁 | 怎么用 |
+|---|---|---|
+| 🌐 **在线版**（0 安装） | 手机上用、发给别人用、先试试 | 打开 **<https://andersonjames0526.github.io/life-agent/>**<br>数据存在浏览器里，换设备用「导出备份」 |
+| ⬇️ **下载版**（推荐日常） | 自己电脑长期用 | 去 [Releases](https://github.com/AndersonJames0526/life-agent/releases) 下载 zip → 解压 → 双击 `run.bat` |
+| 🐍 **源码运行** | 想改代码 / 接大模型 | `git clone` 后 `python app.py` |
+
+> 在线版和本地版是**两个独立实现**：在线版纯前端（数据存浏览器 localStorage），本地版有 Python 后端（数据存 SQLite）。同一套中文解析规则、同一个界面。
+> 只有本地版支持接入 DeepSeek 大模型。
+
+本地版：
+
 ```
 python app.py          # 打开网页版，浏览器自动弹出
 ```
@@ -94,15 +107,17 @@ python app.py
 life-agent/
 ├── app.py              # 全部后端：SQLite + 中文解析 + 工具层 + HTTP 服务（单文件，约 800 行）
 ├── static/
-│   └── index.html      # 前端：聊天 + 看板（原生 JS，零框架，零构建）
+│   └── index.html      # 本地版前端：聊天 + 看板（原生 JS，零框架，零构建）
 ├── docs/
+│   ├── index.html      # 在线版：单文件纯前端 App（GitHub Pages 直接跑，数据存浏览器）
 │   └── screenshot.png
 ├── run.bat / run.sh    # 双击启动
 ├── data/life.db        # 你的数据（.gitignore 已排除）
 └── app.py --self-test  # 8 条指令的自检
 ```
 
-三个文件就能跑起来：`app.py` + `static/index.html` + Python 本身。
+本地版三个文件就能跑起来：`app.py` + `static/index.html` + Python 本身。
+在线版就一个文件：`docs/index.html`，双击就能用，也可以丢到任何静态托管上。
 
 ---
 
