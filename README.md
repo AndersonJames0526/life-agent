@@ -31,7 +31,7 @@ python app.py          # 打开网页版，浏览器自动弹出
 ## 快速开始
 
 ```bash
-git clone https://github.com/<你的用户名>/life-agent.git
+git clone https://github.com/AndersonJames0526/life-agent.git
 cd life-agent
 
 python app.py           # Windows 也可以双击 run.bat
